@@ -1,3 +1,5 @@
+package at.ac.tuwien;
+
 import at.ac.tuwien.ifs.sge.core.agent.AbstractRealTimeGameAgent;
 import at.ac.tuwien.ifs.sge.core.engine.communication.ActionResult;
 import at.ac.tuwien.ifs.sge.core.game.RealTimeGame;

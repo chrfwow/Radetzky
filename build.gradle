@@ -19,3 +19,12 @@ dependencies {
 test {
     useJUnitPlatform()
 }
+
+jar {
+    manifest {
+        attributes 'Sge-Type': 'agent'
+        attributes 'Agent-Name': 'Radetzky'
+        attributes 'Main-Class': 'at.ac.tuwien.Radetzky'
+        attributes 'Sge-Realtime': true
+    }
+}
