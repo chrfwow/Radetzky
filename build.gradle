@@ -1,9 +1,12 @@
 plugins {
     id 'java'
+
+    // add a shadow plugin to create a fat jar that includes all dependencies
+    id 'com.github.johnrengelman.shadow' version '7.1.0'
 }
 
-group 'at.tuwien'
-version '1.0-SNAPSHOT'
+group 'at.ac.tuwien.ifs.sge'
+version '0.0.0'
 
 repositories {
     mavenCentral()
@@ -12,6 +15,8 @@ repositories {
 
 dependencies {
     implementation 'com.gitlab.rt-sge:core:1.1.0'
+    implementation 'com.gitlab.rt-sge:rt-sge-empire:1.1.4'
+
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
 }
@@ -24,7 +29,12 @@ jar {
     manifest {
         attributes 'Sge-Type': 'agent'
         attributes 'Agent-Name': 'Radetzky'
-        attributes 'Main-Class': 'at.ac.tuwien.Radetzky'
+        attributes 'Main-Class': 'at.ac.tuwien.ifs.sge.agent.Radetzky'
         attributes 'Sge-Realtime': true
     }
+}
+
+// task to create the fat jar which can be started by the engine
+shadowJar {
+    archiveClassifier.set('exe')
 }
