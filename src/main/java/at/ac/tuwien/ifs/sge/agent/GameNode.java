@@ -5,17 +5,12 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
-import java.util.Stack;
 
 import at.ac.tuwien.ifs.sge.core.engine.communication.events.GameActionEvent;
 import at.ac.tuwien.ifs.sge.core.engine.logging.Logger;
 import at.ac.tuwien.ifs.sge.core.game.exception.ActionException;
-import at.ac.tuwien.ifs.sge.core.util.Util;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
-import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.MovementStartOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
-import at.ac.tuwien.ifs.sge.game.empire.exception.EmpireMapException;
-import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireTerrain;
 
 public class GameNode {
     private final int executionTime;
@@ -27,37 +22,28 @@ public class GameNode {
     private List<GameNode> children;
     private int wins;
     private int visits;
-    private int newlyDiscoveredTiles;
+    private final double heuristic;
+    private final UnitHeuristics immutableUnitHeuristics;
 
-    public GameNode(int executionTime, int playerId, Empire immutableGameState, EmpireEvent responsibleAction, double discoveredTilesRatio) {
+    public GameNode(UnitHeuristics unitHeuristics, int executionTime, int playerId, Empire immutableGameState, EmpireEvent responsibleAction, double discoveredTilesRatio) {
         this.executionTime = executionTime;
         this.playerId = playerId;
         this.immutableGameState = immutableGameState;
         this.responsibleAction = responsibleAction;
-        var gameState = getGameState();
-        unexploredActions = EventHeuristics.fromGameState(gameState, playerId, discoveredTilesRatio);
-
-        if (responsibleAction instanceof MovementStartOrder movementStartOrder) {
-            var destination = movementStartOrder.getDestination();
-            var map = gameState.getBoard();
-            var unit = gameState.getUnit(movementStartOrder.getUnitId());
-            var fov = unit.getFov();
-
-            try {
-                for (int x = -fov; x <= fov; x++) {
-                    for (int y = -fov; y <= fov; y++) {
-                        if (x == 0 && y == 0) continue;
-                        var actualX = destination.getX() + x;
-                        var actualY = destination.getY() + y;
-                        if (!map.isInside(actualX, actualY)) continue;
-                        EmpireTerrain tile = map.getTile(actualX, actualY);
-                        if (tile == null) newlyDiscoveredTiles++;
-                    }
-                }
-            } catch (EmpireMapException e) {
-                e.printStackTrace();
-            }
+        this.immutableUnitHeuristics = unitHeuristics;
+        Empire gameState;
+        var copyOfUnitHeuristics = unitHeuristics.copy();
+        try {
+            gameState = getGameState(copyOfUnitHeuristics);
+        } catch (ActionException e) {
+            e.printStackTrace();
+            heuristic = Double.NEGATIVE_INFINITY;
+            unexploredActions = new ArrayList<>();
+            return;
         }
+        this.unexploredActions = EventHeuristics.fromGameState(copyOfUnitHeuristics, gameState, playerId, discoveredTilesRatio);
+        // todo propagate to parent nodes?
+        this.heuristic = EventHeuristics.calculateTotalHeuristic(copyOfUnitHeuristics, gameState, responsibleAction, discoveredTilesRatio);
     }
 
     public void addChild(GameNode gameNode) {
@@ -66,21 +52,16 @@ public class GameNode {
         gameNode.parent = this;
     }
 
-    public Empire getGameState() {
-        Empire currentState;
-        if (parent == null) {
-            currentState = (Empire) immutableGameState.copy();
-        } else {
-            currentState = parent.getGameState();
+    private Empire getGameState(UnitHeuristics copyOfImmutable) throws ActionException {
+        if (parent == null) return (Empire) immutableGameState.copy();
+        Empire currentState = parent.getGameState(copyOfImmutable);
+
+        if (responsibleAction != null) {
+            currentState.scheduleActionEvent(new GameActionEvent<>(playerId, responsibleAction, currentState.getGameClock().getGameTimeMs() + 1));
+            copyOfImmutable.apply(currentState, responsibleAction);
         }
-        try {
-            if (responsibleAction != null) {
-                currentState.scheduleActionEvent(new GameActionEvent<>(playerId, responsibleAction, currentState.getGameClock().getGameTimeMs() + 1));
-            }
-            currentState.advance(executionTime);
-        } catch (ActionException e) {
-            throw new RuntimeException(e);
-        }
+        currentState.advance(executionTime);
+        copyOfImmutable.advance(currentState);
         return currentState;
     }
 
@@ -93,7 +74,6 @@ public class GameNode {
     }
 
     public EmpireEvent popUnexploredAction() {
-        // todo return best by some heuristic
         if (unexploredActions.isEmpty()) return null;
 
         var bestIndex = 0;
@@ -148,7 +128,7 @@ public class GameNode {
 
     public double heuristic(double exploitationConstant) {
         var ucb1 = upperConfidenceBound(exploitationConstant);
-        return ucb1 + newlyDiscoveredTiles;
+        return ucb1 + heuristic;
     }
 
     private double upperConfidenceBound(double exploitationConstant) {
@@ -181,14 +161,14 @@ public class GameNode {
         if (isRoot()) {
             while (hasUnexploredActions()) {
                 var action = popUnexploredAction();
-                addChild(new GameNode(executionTime, nextPlayerId, immutableGameState, action, discoveredTilesRatio));
+                addChild(new GameNode(immutableUnitHeuristics, executionTime, nextPlayerId, immutableGameState, action, discoveredTilesRatio));
             }
-            addChild(new GameNode(executionTime, nextPlayerId, immutableGameState, null, discoveredTilesRatio));
+            addChild(new GameNode(immutableUnitHeuristics, executionTime, nextPlayerId, immutableGameState, null, discoveredTilesRatio));
         } else if (isLeaf()) {
-            addChild(new GameNode(executionTime, nextPlayerId, immutableGameState, null, discoveredTilesRatio));
+            addChild(new GameNode(immutableUnitHeuristics, executionTime, nextPlayerId, immutableGameState, null, discoveredTilesRatio));
         } else {
             var action = popUnexploredAction();
-            addChild(new GameNode(executionTime, nextPlayerId, immutableGameState, action, discoveredTilesRatio));
+            addChild(new GameNode(immutableUnitHeuristics, executionTime, nextPlayerId, immutableGameState, action, discoveredTilesRatio));
         }
     }
 
@@ -206,7 +186,13 @@ public class GameNode {
 
     public boolean[] simulate(Random random, int simulationDepth, long timeOfNextDecision, Logger log, double discoveredTilesRatio) {
         var depth = 0;
-        var game = (Empire) getGameState();
+        var unitHeuristics = immutableUnitHeuristics.copy();
+        Empire game;
+        try {
+            game = getGameState(unitHeuristics);
+        } catch (ActionException e) {
+            return null;
+        }
         var currentPlayer = playerId;
         try {
             while (!game.isGameOver() && depth++ <= simulationDepth && System.currentTimeMillis() < timeOfNextDecision) {
@@ -214,15 +200,17 @@ public class GameNode {
                 if (possibleActions.size() > 0) {
                     var doNothing = random.nextInt(possibleActions.size()) == 0; // todo use heuristic
                     if (!doNothing) {
-                        var nextAction = EventHeuristics.selectBest(game, possibleActions, discoveredTilesRatio);
+                        var nextAction = EventHeuristics.selectBest(unitHeuristics, game, possibleActions, discoveredTilesRatio);
                         game.scheduleActionEvent(new GameActionEvent<>(currentPlayer, nextAction, game.getGameClock().getGameTimeMs() + 1));
+                        unitHeuristics.apply(game, nextAction);
                     }
                 }
-
                 game.advance(executionTime);
+                unitHeuristics.advance(game);
                 currentPlayer = (currentPlayer + 1) % game.getNumberOfPlayers();
             }
-        } catch (ActionException ignored) {
+        } catch (ActionException e) {
+            if (e.getMessage().contains("produce unit with id ")) return null; // happens when a unit is produced, but the occupying unit leaves the city in the meantime
         }
         return determineWinner(game);
     }
@@ -248,6 +236,7 @@ public class GameNode {
     }
 
     public void backPropagation(boolean[] winners) {
+        if (winners == null) return;
         incrementVisits();
         var playerId = (this.playerId - 1);
         if (playerId < 0) playerId = immutableGameState.getNumberOfPlayers() - 1;
