@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'at.ac.tuwien.ifs.sge'
-version '0.0.0'
+version '0.1.0'
 
 repositories {
     mavenCentral()
@@ -28,7 +28,7 @@ test {
 jar {
     manifest {
         attributes 'Sge-Type': 'agent'
-        attributes 'Agent-Name': 'Radetzky'
+        attributes 'Agent-Name': 'Radetzky - Production Agent'
         attributes 'Main-Class': 'at.ac.tuwien.ifs.sge.agent.Radetzky'
         attributes 'Sge-Realtime': true
     }

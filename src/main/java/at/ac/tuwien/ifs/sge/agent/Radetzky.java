@@ -3,6 +3,8 @@ package at.ac.tuwien.ifs.sge.agent;
 import at.ac.tuwien.ifs.sge.core.agent.AbstractRealTimeGameAgent;
 import at.ac.tuwien.ifs.sge.core.engine.communication.ActionResult;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.ProductionAction;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.ProductionStartOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 
 import java.util.concurrent.Executors;
@@ -22,12 +24,26 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
     @Override
     public void startPlaying() {
-        super.startPlaying();
+        var city = game.getUnitsByPlayer(playerId).get(0);
+        var unitTypeId = 2; // Scout
+        var productionStartOrder = new ProductionStartOrder(city.getPosition(), unitTypeId);
+
+        sendAction(productionStartOrder, System.currentTimeMillis() + 50);
     }
 
     @Override
     protected void onGameUpdate(EmpireEvent action, ActionResult result) {
+        if (action instanceof ProductionAction productionAction) {
+            var city = game.getCity(productionAction.getCityPosition());
 
+            if (city.getPlayerId() == playerId) {
+                var newUnit = game.getUnit(productionAction.getUnitId());
+
+                var productionStartOrder = new ProductionStartOrder(city.getPosition(), newUnit.getUnitTypeId());
+
+                sendAction(productionStartOrder, System.currentTimeMillis() + 50);
+            }
+        }
     }
 
     @Override
