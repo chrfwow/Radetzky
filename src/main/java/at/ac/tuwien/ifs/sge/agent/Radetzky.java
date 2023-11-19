@@ -20,13 +20,8 @@ import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireCity;
 
 public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
     public static final double DEFAULT_EXPLOITATION_CONSTANT = Math.sqrt(2);
-    private static final int DEFAULT_SIMULATION_DEPTH = 20;
-    private static final int executionTime = 1000;
-    private static final Comparator<GameNode> gameMcTreeSelectionComparator = Comparator.comparingDouble(t -> t.heuristic(DEFAULT_EXPLOITATION_CONSTANT));
     private Future<?> mctsIterationFuture;
     private volatile boolean isRunning;
-    private final UnitDirectory unitDirectory;
-    private final HashSet<EmpireEvent> concurrentEvents = new HashSet<>();
 
     public static void main(String[] args) {
         var playerId = getPlayerIdFromArgs(args);
@@ -37,25 +32,16 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
     public Radetzky(int playerId, String playerName, int logLevel) {
         super(Empire.class, playerId, playerName, logLevel);
-        unitDirectory = new UnitDirectory(playerId);
     }
 
     @Override
     public void startPlaying() {
         isRunning = true;
         mctsIterationFuture = pool.submit(this::playSimulation);
-        // new Thread(this::playSimulation).start();
     }
 
     @Override
     protected void onGameUpdate(EmpireEvent action, ActionResult result) {
-        unitDirectory.onGameUpdate(game, action, log);
-        synchronized (concurrentEvents) {
-            if (concurrentEvents.remove(action)) {
-                log.info("removing from concurrentEvents");
-            }
-        }
-        //unitDirectory.print(log);
     }
 
     @Override
@@ -80,125 +66,38 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
         mctsIterationFuture.cancel(true);
     }
 
-    private double getDiscoveredTilesRatio(Empire gameState) {
-        var board = gameState.getBoard();
-        var size = board.getMapSize();
-        int discovered = 0;
-        int undiscovered = 0;
-        try {
-            for (int x = 0; x < size.getWidth(); x += 3) {
-                for (int y = 0; y < size.getHeight(); y += 3) {
-                    if (board.getTile(x, y) == null) undiscovered++;
-                    else discovered++;
-                }
-            }
-        } catch (EmpireMapException e) {
-            log.error(e);
-        }
-        return ((double) discovered) / (undiscovered + discovered);
-    }
-
     private void playSimulation() {
         log.info("play simulation");
-        Random random = new Random();
-        EmpireEvent lastAction = null;
-        boolean firstProd = true;
-        while (isRunning) {
-            try {
-                var simulatedGameState = (Empire) game.copy();
-                for (Map.Entry<Position, EmpireCity> entry : simulatedGameState.getCitiesByPosition().entrySet()) {
-                    var city = entry.getValue();
-                    log.info("city " + city + " in state " + city.getState());
-                }
-                if (lastAction != null) {
-                    log.info("-------------------------------------------------------------");
-                    log.info("-------------------------------------------------------------");
-                    log.info("last action " + lastAction.getClass().getSimpleName() + " " + lastAction);
-                } else log.info("last action == null");
-                var unitHeuristics = unitDirectory.getHeuristics();
-                if (lastAction != null && simulatedGameState.isValidAction(lastAction, playerId)) {
-                    simulatedGameState.scheduleActionEvent(new GameActionEvent<>(playerId, lastAction, simulatedGameState.getGameClock().getGameTimeMs() + 1));
-                    unitHeuristics.apply(simulatedGameState, lastAction);
-                }
+        try {
+            Thread.sleep(300);
+        } catch (InterruptedException e) {
+        }
+        log.info("send prod order");
+        var copy = (Empire) game.copy();
 
-                try {
-                    simulatedGameState.advance(executionTime);
-                } catch (ActionException e) {
-
-                    log.info(e.getMessage());
-                    var cause = e.getCause();
-                    if (cause != null) log.info(cause.getMessage());
-                    Thread.sleep(1000);
-                    continue;
-                }
-                lastAction = null;
-                unitHeuristics.advance(simulatedGameState);
-
-                var discoveredTilesRatio = getDiscoveredTilesRatio(simulatedGameState);
-                log.info("discoveredTilesRatio " + discoveredTilesRatio);
-
-                var root = new GameNode(unitHeuristics, executionTime, playerId, simulatedGameState, null, discoveredTilesRatio);
-
-                var iterations = 0;
-                var now = System.currentTimeMillis();
-                var timeOfNextDecision = now + executionTime;
-
-                while (System.currentTimeMillis() < timeOfNextDecision) {
-
-                    // Select the best from the children according to the upper confidence bound
-                    var tree = root.selection(gameMcTreeSelectionComparator);
-
-                    // Expand the selected node by one action
-                    tree.expand(discoveredTilesRatio);
-
-                    // Simulate until the simulation depth is reached and determine winners
-                    var winners = tree.simulate(random, DEFAULT_SIMULATION_DEPTH, timeOfNextDecision, log, discoveredTilesRatio);
-
-                    // Back propagate the wins of the agent
-                    tree.backPropagation(winners);
-
-                    iterations++;
-                }
-
-                if (root.isLeaf()) {
-                    log.info("Could not find a move! Doing nothing...");
-                } else {
-                    log.info("Iterations: " + iterations);
-                    root.print(log);
-                    var mostVisitedChild = root.getMostVisitedChild();
-                    var bestAction = mostVisitedChild.getResponsibleAction();
-                    if (bestAction instanceof ProductionStartOrder) {
-                        if (!firstProd) bestAction = null;
-                        firstProd = false;
-                    }
-                    if (bestAction != null) {
-                        log.info("Determined next action: " + bestAction.getClass().getSimpleName() + " " + bestAction);
-
-                        synchronized (concurrentEvents) {
-                            if (concurrentEvents.contains(bestAction)) {
-                                log.info("best action is already performed, skipping");
-                                continue;
-                            }
-                            concurrentEvents.add(bestAction);
-                        }
-                        if (game.isValidAction(bestAction)) sendAction(bestAction, System.currentTimeMillis() + 50);
-                        else bestAction = null;
-                    } else {
-                        log.info("Determined next action: null");
-                    }
-                    lastAction = bestAction;
-                }
-
-            } catch (Exception e) {
-                log.printStackTrace(e);
-                break;
-            } catch (OutOfMemoryError e) {
-                log.error("OOM!");
-                e.printStackTrace();
+        var actions = copy.getPossibleActions(playerId);
+        for (EmpireEvent action : actions) {
+            if (action instanceof ProductionStartOrder) {
+                sendAction(action, System.currentTimeMillis() + 50);
                 break;
             }
-            Thread.yield();
         }
+        while (isRunning) {
+            copy = (Empire) game.copy();
+            try {
+                log.info("advancing...");
+                copy.advance(1000);
+            } catch (ActionException e) {
+                log.info(e.getMessage());
+                var cause = e.getCause();
+                if (cause != null) log.info(cause.getMessage());
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+            }
+        }
+
         log.info("stopped playing");
     }
 }
