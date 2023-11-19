@@ -1,12 +1,9 @@
 package at.ac.tuwien.ifs.sge.agent;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
@@ -184,8 +181,8 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
                             }
                             concurrentEvents.add(bestAction);
                         }
-
-                        sendAction(bestAction, System.currentTimeMillis() + 50);
+                        if (game.isValidAction(bestAction)) sendAction(bestAction, System.currentTimeMillis() + 50);
+                        else bestAction = null;
                     } else {
                         log.info("Determined next action: null");
                     }

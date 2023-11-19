@@ -22,7 +22,7 @@ public class GameNode {
     private List<GameNode> children;
     private int wins;
     private int visits;
-    private final double heuristic;
+    private double heuristic;
     private final UnitHeuristics immutableUnitHeuristics;
 
     public GameNode(UnitHeuristics unitHeuristics, int executionTime, int playerId, Empire immutableGameState, EmpireEvent responsibleAction, double discoveredTilesRatio) {
@@ -44,6 +44,13 @@ public class GameNode {
         this.unexploredActions = EventHeuristics.fromGameState(copyOfUnitHeuristics, gameState, playerId, discoveredTilesRatio);
         // todo propagate to parent nodes?
         this.heuristic = EventHeuristics.calculateTotalHeuristic(copyOfUnitHeuristics, gameState, responsibleAction, discoveredTilesRatio);
+        if (parent != null) parent.setHeuristic(heuristic);
+    }
+
+    private void setHeuristic(double childHeuristic) {
+        if (childHeuristic <= heuristic) return;
+        heuristic = childHeuristic;
+        if (parent != null) parent.setHeuristic(heuristic);
     }
 
     public void addChild(GameNode gameNode) {
@@ -212,6 +219,7 @@ public class GameNode {
         } catch (ActionException e) {
             if (e.getMessage().contains("produce unit with id ")) return null; // happens when a unit is produced, but the occupying unit leaves the city in the meantime
         }
+        // todo maybe somehow add heuristic gained in the simulation to the heuristic value of the node, if the win counter does not reflect that gained knowledge
         return determineWinner(game);
     }
 
