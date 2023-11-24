@@ -9,14 +9,13 @@ import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.Producti
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.stop.ProductionStopOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireCity;
-import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireProductionState;
 import at.ac.tuwien.ifs.sge.game.empire.model.units.EmpireUnit;
 
 public class UnitHeuristics {
     double tilesDiscoverCapacity;
     double damageCapacity;
     double totalHp;
-    private final Map<EmpireCity, Production> inProduction;
+    private final Map<EmpireCity, Production> inProduction; // todo remove?
 
     public UnitHeuristics(List<EmpireUnit> units, Map<EmpireCity, Production> inProduction) {
         var tilesDiscoverCapacity = 0.0;
@@ -69,26 +68,25 @@ public class UnitHeuristics {
         });
     }
 
-    private static double calculateHeuristicFromUnitType(int unitType, double discoveredTilesRatio) {
-        double inverseRatio = 1.0 - discoveredTilesRatio;
-        double squaredRatio = discoveredTilesRatio * discoveredTilesRatio;
-        double costMalus = UnitStats.costOfType[unitType] / UnitStats.maxUnitCost;
+    private static float calculateHeuristicFromUnitType(int unitType, DiscoveredBoard discoveredBoard) {
+        var discoveredTilesRatio = discoveredBoard.getDiscoveredBoardRatio();
+        float inverseRatio = 1f - discoveredTilesRatio;
+        float squaredRatio = discoveredTilesRatio * discoveredTilesRatio;
+        float costMalus = UnitStats.costOfType[unitType] / UnitStats.maxUnitCost;
         costMalus *= costMalus;
-        return UnitStats.speedOfType[unitType] * UnitStats.fovOfType[unitType] * inverseRatio +
-                UnitStats.hpOfType[unitType] * squaredRatio + UnitStats.damagePerSecondOfType[unitType] * squaredRatio - costMalus;
+        return UnitStats.speedOfType[unitType] * UnitStats.fovOfType[unitType] * inverseRatio + // make fast units in the beginning
+                (UnitStats.hpOfType[unitType] / UnitStats.maxHp) * squaredRatio +  // make strong units in the end
+                UnitStats.damagePerSecondOfType[unitType] * squaredRatio - costMalus;
     }
 
-    public static double calculateUnitHeuristic(Empire gameState, EmpireEvent event, double discoveredTilesRatio) {
+    public static float calculateUnitHeuristic(EmpireEvent event, DiscoveredBoard discoveredBoard) {
         if (event instanceof ProductionStopOrder) {
-            return -100; // would abort production of unit with no gain
+            return -100f; // would abort production of unit with no gain
         } else if (event instanceof ProductionStartOrder productionStartOrder) {
-            var city = gameState.getCity(productionStartOrder.getCityPosition());
-            if (city.getState() == EmpireProductionState.Producing) return -10000; // must not happen todo find a better way to prevent this
-            return calculateHeuristicFromUnitType(productionStartOrder.getUnitTypeId(), discoveredTilesRatio);
+            return 10f * calculateHeuristicFromUnitType(productionStartOrder.getUnitTypeId(), discoveredBoard);
         }
         return 0;
     }
-
 
     public boolean isCityProducing(EmpireCity city) {
         var producing = inProduction.getOrDefault(city, null);

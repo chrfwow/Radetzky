@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'at.ac.tuwien.ifs.sge'
-version '0.0.1'
+version '0.0.4'
 
 repositories {
     mavenCentral()
@@ -14,8 +14,8 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.gitlab.rt-sge:core:1.1.0'
-    implementation 'com.gitlab.rt-sge:rt-sge-empire:1.1.4'
+    implementation 'com.gitlab.rt-sge:core:1.1.2'
+    implementation 'com.gitlab.rt-sge:rt-sge-empire:1.1.7'
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
@@ -28,7 +28,7 @@ test {
 jar {
     manifest {
         attributes 'Sge-Type': 'agent'
-        attributes 'Agent-Name': 'Radetzky-ch-explorer'
+        attributes 'Agent-Name': 'Radetzky-ch-multi-explorer'
         attributes 'Main-Class': 'at.ac.tuwien.ifs.sge.agent.Radetzky'
         attributes 'Sge-Realtime': true
     }
@@ -37,4 +37,5 @@ jar {
 // task to create the fat jar which can be started by the engine
 shadowJar {
     archiveClassifier.set('exe')
+    archiveFileName = "D:\\A_Uni\\A_MSc\\SGP\\Empire\\rt-sge_combined_1.5\\binaries\\agents\\${baseName}-${version}-${classifier}.jar"
 }
