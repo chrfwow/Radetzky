@@ -5,6 +5,7 @@ import at.ac.tuwien.ifs.sge.core.engine.communication.ActionResult;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 
+import java.util.HashMap;
 import java.util.concurrent.Executors;
 
 public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
@@ -26,7 +27,7 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
     }
 
     @Override
-    protected void onGameUpdate(EmpireEvent action, ActionResult result) {
+    protected void onGameUpdate(HashMap<EmpireEvent, ActionResult> actionsWithResult) {
 
     }
 
