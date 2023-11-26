@@ -5,14 +5,18 @@ import at.ac.tuwien.ifs.sge.core.engine.communication.ActionResult;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.VisionUpdate;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.MovementAction;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.ProductionAction;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.MovementStartOrder;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.ProductionStartOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 import at.ac.tuwien.ifs.sge.game.empire.exception.EmpireMapException;
 import at.ac.tuwien.ifs.sge.game.empire.map.Position;
+import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireCity;
 import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireTerrain;
 import at.ac.tuwien.ifs.sge.game.empire.model.units.EmpireUnit;
 
 import java.util.HashMap;
+import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -35,30 +39,31 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
     @Override
     public void startPlaying() {
+        log.trace("START PLAYING:");
+
         // Gets all the cities the player can see:
         var cities = getGame().getCitiesByPosition();
 
-//        log.info("CITIES");
+        BiConsumer<Position, EmpireCity> produce = (position, city) -> {
+            produceUnit(city);
+        };
+
+        cities.forEach(produce);
+
+//        // Gets all the units the player owns:
+//        var units = getGame().getUnitsByPlayer(playerId);
 //
-//        BiConsumer<Position, EmpireCity> printTest = (position, city) -> {
-//            log.info("\tNAME: " + city.getName());
-//            log.info("\tPOSITION: " + position.toString());
-//            log.info("\tPLAYER ID: " + city.getPlayerId());
-//            log.info("\tSTATE: " + city.getState());
-//            log.info("\n");
+//        Consumer<EmpireUnit> move = (unit) -> {
+//            moveUnit(unit);
 //        };
 //
-//        cities.forEach(printTest);
-//
-//        log.info("DISCOVERED MAP:\n" + getGame().getBoard().getDiscoveredMap(playerId) + "\n");
-
-        var unit = getGame().getUnitsByPlayer(playerId).get(0);
-
-        moveUnit(unit);
+//        units.forEach(move);
     }
 
     @Override
     protected void onGameUpdate(HashMap<EmpireEvent, ActionResult> actionsWithResult) {
+        log.trace("ON GAME UPDATE:");
+
         BiConsumer<EmpireEvent, ActionResult> handleAction = (action, result) -> {
             if (action instanceof VisionUpdate visionUpdate) {
 //                log.info("NEW TERRAIN");
@@ -73,7 +78,24 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 //
 //                visionUpdate.getNewActive().forEach(printTest);
             } else if (action instanceof MovementAction movementAction) {
-                moveUnit(movementAction.getUnitId());
+                var unit = getGame().getUnit(movementAction.getUnitId());
+
+                try {
+                    var tile = getGame().getBoard().getTile(unit.getPosition());
+
+                    if (tile.getMapIdentifier() == 'c') {
+                        produceUnit(getGame().getCity(tile.getPosition()));
+
+                        return;
+                    }
+                } catch (EmpireMapException e) {
+                    throw new RuntimeException(e);
+                }
+
+                moveUnit(unit);
+            } else if (action instanceof ProductionAction productionAction) {
+                produceUnit(productionAction.getCityPosition());
+                moveUnit(productionAction.getUnitId());
             } else {
                 log.info("ACTION: " + action);
             }
@@ -84,6 +106,8 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
     @Override
     protected void onActionRejected(EmpireEvent action) {
+        log.trace("ON ACTION REJECTED:");
+
         if (action instanceof MovementAction movementAction) {
             moveUnit(movementAction.getUnitId());
         }
@@ -104,6 +128,17 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
     }
 
+    private void produceUnit(EmpireCity city) {
+        var unitTypeId = 2; // Scout
+        var productionStartOrder = new ProductionStartOrder(city.getPosition(), unitTypeId);
+
+        sendAction(productionStartOrder, System.currentTimeMillis() + 100);
+    }
+
+    private void produceUnit(Position cityPosition) {
+        produceUnit(getGame().getCity(cityPosition));
+    }
+
     private void moveUnit(EmpireUnit unit) {
         var nextPosition = getNextPosition(unit.getPosition());
         var movementStartOrder = new MovementStartOrder(unit, nextPosition);
@@ -116,18 +151,12 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
     }
 
     private Position getNextPosition(Position currentPosition) {
-        var x = currentPosition.getX();
-        var y = currentPosition.getY();
         var board = getGame().getBoard();
         var mapSize = board.getMapSize();
-        EmpireTerrain tile = null;
 
-        while ((x == currentPosition.getX() && y == currentPosition.getY()) ||
-                tile.getMapIdentifier() == 'm' ||
-                tile.isOccupied()) {
-
-            x = currentPosition.getX() + random.nextInt(3) - 1;
-            y = currentPosition.getY() + random.nextInt(3) - 1;
+        for (int i = 0; i < 5; ++i) {
+            var x = currentPosition.getX() + random.nextInt(3) - 1;
+            var y = currentPosition.getY() + random.nextInt(3) - 1;
 
             if (x < 0) {
                 x = 0;
@@ -146,12 +175,18 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
             }
 
             try {
-                tile = board.getTile(x, y);
+                var tile = board.getTile(x, y);
+
+                if ((x != currentPosition.getX() || y != currentPosition.getY()) &&
+                        tile.getMapIdentifier() != 'm' &&
+                        !tile.isOccupied()) {
+                    return new Position(x, y);
+                }
             } catch (EmpireMapException e) {
                 throw new RuntimeException(e);
             }
         }
 
-        return new Position(x, y);
+        return currentPosition;
     }
 }
