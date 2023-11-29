@@ -6,6 +6,12 @@ import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import at.ac.tuwien.ifs.sge.agent.discoveredBoard.DiscoveredBoard;
+import at.ac.tuwien.ifs.sge.agent.discoveredBoard.EnemyDiscoveredBoard;
+import at.ac.tuwien.ifs.sge.agent.discoveredBoard.RadetzkyDiscoveredBoard;
+import at.ac.tuwien.ifs.sge.agent.unitHeuristics.EnemyUnitHeuristics;
+import at.ac.tuwien.ifs.sge.agent.unitHeuristics.UnitDirectory;
+import at.ac.tuwien.ifs.sge.agent.unitHeuristics.UnitHeuristics;
 import at.ac.tuwien.ifs.sge.core.agent.AbstractRealTimeGameAgent;
 import at.ac.tuwien.ifs.sge.core.engine.communication.ActionResult;
 import at.ac.tuwien.ifs.sge.core.engine.communication.events.GameActionEvent;
@@ -20,7 +26,10 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
     private static final int simulationTimeStep = 1000;
     private Future<?> mctsIterationFuture;
     private volatile boolean isRunning;
-    private final UnitDirectory unitDirectory;
+    private UnitDirectory unitDirectory;
+    private RadetzkyDiscoveredBoard radetzkyDiscoveredBoard;
+    private UnitHeuristics[] unitHeuristics;
+    private DiscoveredBoard[] gameBoards;
 
     public static void main(String[] args) {
         var playerId = getPlayerIdFromArgs(args);
@@ -31,12 +40,30 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
     public Radetzky(int playerId, String playerName, int logLevel) {
         super(Empire.class, playerId, playerName, logLevel);
-        unitDirectory = new UnitDirectory(playerId);
     }
 
     @Override
     public void startPlaying() {
-            mctsIterationFuture = pool.submit(this::playSimulation);
+        isRunning = true;
+        unitDirectory = new UnitDirectory(playerId);
+        initHeuristics();
+        mctsIterationFuture = pool.submit(this::playSimulation);
+    }
+
+    private void initHeuristics() {
+        var game = copyGame();
+        var numberOfPlayers = game.getNumberOfPlayers();
+        gameBoards = new DiscoveredBoard[numberOfPlayers];
+        unitHeuristics = new UnitHeuristics[numberOfPlayers];
+        for (int i = 0; i < numberOfPlayers; i++) {
+            if (i == playerId) {
+                gameBoards[i] = radetzkyDiscoveredBoard = RadetzkyDiscoveredBoard.get(playerId, game);
+            } else {
+                var enemyBoard = EnemyDiscoveredBoard.get(i, game);
+                gameBoards[i] = enemyBoard;
+                unitHeuristics[i] = new EnemyUnitHeuristics(i, enemyBoard);
+            }
+        }
     }
 
     @Override
@@ -59,7 +86,13 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
     protected void onGameUpdate(HashMap<EmpireEvent, ActionResult> actionsWithResult) {
         var game = getGame();
         for (Map.Entry<EmpireEvent, ActionResult> entry : actionsWithResult.entrySet()) {
-            unitDirectory.onGameUpdate(game, entry.getKey(), log);
+            if (!entry.getValue().wasSuccessful()) continue;
+            var action = entry.getKey();
+            unitDirectory.onGameUpdate(game, action, log);
+            for (int i = 0; i < unitHeuristics.length; i++) {
+                unitHeuristics[i].apply(game, action);
+                gameBoards[i].apply(game, action);
+            }
         }
     }
 
@@ -76,27 +109,14 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
         while (isRunning) {
             try {
                 var simulatedGameState = copyGame();
+                unitHeuristics[playerId] = unitDirectory.getHeuristics(radetzkyDiscoveredBoard.copy());
 
-                var unitHeuristics = unitDirectory.getHeuristics();
-                if (lastAction != null && simulatedGameState.isValidAction(lastAction, playerId)) {
-                    simulatedGameState.scheduleActionEvent(new GameActionEvent<>(playerId, lastAction, simulatedGameState.getGameClock().getGameTimeMs() + 1));
-                    unitHeuristics.apply(simulatedGameState, lastAction);
-                }
-
-                try {
-                    simulatedGameState.advance(executionTime);
-                } catch (ActionException e) {
-                    log.info(e.getMessage());
-                    var cause = e.getCause();
-                    if (cause != null) log.info(cause.getMessage());
-                    continue;
-                }
+                applyLastAction(lastAction, numberOfPlayers, gameBoards, unitHeuristics, simulatedGameState);
                 lastAction = null;
-                unitHeuristics.advance(simulatedGameState);
 
-                var discoveredBoard = DiscoveredBoard.get(simulatedGameState);
+                if (!advanceSimulatedGameAndHeuristics(numberOfPlayers, gameBoards, unitHeuristics, simulatedGameState)) continue;
 
-                var root = new GameNode(unitHeuristics, simulationTimeStep, playerId, simulatedGameState, null, discoveredBoard);
+                var root = new GameNode(random, unitHeuristics, simulationTimeStep, playerId, playerId, playerId, simulatedGameState, null, gameBoards);
 
                 var iterations = 0;
                 var now = System.currentTimeMillis();
@@ -111,10 +131,7 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
                     tree.expand();
 
                     // Simulate until the simulation depth is reached and determine winners
-                    var winners = tree.simulate(random, DEFAULT_SIMULATION_DEPTH, timeOfNextDecision, log);
-
-                    // Back propagate the wins of the agent
-                    tree.backPropagation(winners);
+                    tree.simulate(random, DEFAULT_SIMULATION_DEPTH, timeOfNextDecision, log);
 
                     iterations++;
                 }
@@ -129,6 +146,8 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
                     if (bestAction != null) {
                         log.info("Determined next action: " + bestAction.getClass().getSimpleName() + " " + bestAction);
                         sendAction(bestAction, System.currentTimeMillis() + 50);
+                    } else {
+                        log.info("Best to take no action");
                     }
                     lastAction = bestAction;
                 }
@@ -143,5 +162,31 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
             }
         }
         log.info("stopped playing");
+    }
+
+    private boolean advanceSimulatedGameAndHeuristics(int numberOfPlayers, DiscoveredBoard[] gameBoards, UnitHeuristics[] unitHeuristics, Empire simulatedGameState) {
+        try {
+            simulatedGameState.advance(executionTime);
+        } catch (ActionException e) {
+            log.info(e.getMessage());
+            var cause = e.getCause();
+            if (cause != null) log.info(cause.getMessage());
+            return false;
+        }
+
+        for (int i = 0; i < numberOfPlayers; i++) {
+            unitHeuristics[i].advance(simulatedGameState, executionTime);
+            gameBoards[i].advance(executionTime, simulatedGameState, unitHeuristics[i]);
+        }
+        return true;
+    }
+
+    private void applyLastAction(EmpireEvent lastAction, int numberOfPlayers, DiscoveredBoard[] gameBoards, UnitHeuristics[] unitHeuristics, Empire simulatedGameState) {
+        if (lastAction == null || !simulatedGameState.isValidAction(lastAction, playerId)) return;
+        simulatedGameState.scheduleActionEvent(new GameActionEvent<>(playerId, lastAction, simulatedGameState.getGameClock().getGameTimeMs() + 1));
+        for (int i = 0; i < numberOfPlayers; i++) {
+            unitHeuristics[i].apply(simulatedGameState, lastAction);
+            gameBoards[i].apply(simulatedGameState, lastAction);
+        }
     }
 }

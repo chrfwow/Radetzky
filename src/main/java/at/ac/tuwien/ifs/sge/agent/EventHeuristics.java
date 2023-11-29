@@ -1,23 +1,23 @@
 package at.ac.tuwien.ifs.sge.agent;
 
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
+import at.ac.tuwien.ifs.sge.agent.discoveredBoard.DiscoveredBoard;
+import at.ac.tuwien.ifs.sge.agent.unitHeuristics.UnitHeuristics;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.MovementStartOrder;
-import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.stop.ProductionStopOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
-import at.ac.tuwien.ifs.sge.game.empire.exception.EmpireMapException;
 import at.ac.tuwien.ifs.sge.game.empire.map.Position;
 import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireCity;
-import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireProductionState;
-import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireTerrain;
 import at.ac.tuwien.ifs.sge.game.empire.model.units.EmpireUnitState;
 
 public class EventHeuristics {
     public final EmpireEvent event;
-    public final double heuristic;
+    public final float heuristic;
 
     // todo use playerId, if other player than -heuristic
     public EventHeuristics(Empire gameState, EmpireEvent event, DiscoveredBoard discoveredBoard) {
@@ -45,7 +45,7 @@ public class EventHeuristics {
             if (cityAtStart != null) {
                 var unitsOnCity = cityAtStart.getOccupants().size();
                 if (unitsOnCity <= 1) {
-                    return -100000; // would abort production of unit
+                    return -1000000f; // would abort production of unit
                 }
             }
 
@@ -77,7 +77,7 @@ public class EventHeuristics {
 
                 if (closest != null) {
                     var distanceFromStart = closestDist;
-                    if (distanceFromStart < .001f) distanceFromStart = .001f; // prevent division by 0
+                    if (distanceFromStart < .001f) distanceFromStart = .001f; // prevent division by 0, should never happen anyway
                     var distanceFromDestination = PositionExtensions.GetDistance(destination, closest.getPosition());
                     // reward getting closer to the closest empty city, faster units will be there sooner, so higher reward
                     // delta / distanceFromStart so that closer units get higher reward, otherwise the furthest unit would be sent to city
@@ -88,24 +88,45 @@ public class EventHeuristics {
         }
         return heuristic +
                 UnitHeuristics.calculateUnitHeuristic(event, discoveredBoard) +
-                DiscoveredBoard.calculateHeuristics(gameState, event, discoveredBoard);
+                discoveredBoard.calculateHeuristics(gameState, event);
     }
 
-    public static EmpireEvent selectBest(Empire gameState, Set<EmpireEvent> possibleActions, DiscoveredBoard discoveredBoard) {
-        EmpireEvent best = null;
-        double bestHeuristic = -1;
+    public static EmpireEvent selectBestRandomly(Random random, Empire gameState, Set<EmpireEvent> possibleActions, DiscoveredBoard discoveredBoard) {
+        var doNothing = random.nextInt(possibleActions.size()) == 0;
+        if (doNothing) return null;
+
+        ArrayList<AbstractMap.SimpleImmutableEntry<EmpireEvent, Float>> eventsAndHeuristics = new ArrayList<>(possibleActions.size());
+        var heuristicSum = 0.0;
+
         for (EmpireEvent event : possibleActions) {
-            if (best == null) {
-                best = event;
-                bestHeuristic = calculateTotalHeuristic(gameState, event, discoveredBoard);
-            } else {
-                var heuristic = calculateTotalHeuristic(gameState, event, discoveredBoard);
-                if (heuristic > bestHeuristic) {
-                    bestHeuristic = heuristic;
-                    best = event;
-                }
+            var heuristics = calculateTotalHeuristic(gameState, event, discoveredBoard);
+            if (heuristics < 0) continue; // todo this totally prevents bad decisions, maybe not so good after all
+            heuristicSum += heuristics;
+            eventsAndHeuristics.add(new AbstractMap.SimpleImmutableEntry<>(event, heuristics));
+        }
+
+        var randomOffset = random.nextDouble() * heuristicSum;
+        var offset = 0.0;
+
+        for (int i = 0; i < eventsAndHeuristics.size(); i++) {
+            var entry = eventsAndHeuristics.get(i);
+            offset += entry.getValue();
+            if (randomOffset < offset) {
+                return entry.getKey();
             }
         }
-        return best;
+        return null;
+    }
+
+    public static float calculatePostSimulation(int playerId, Empire gameState, DiscoveredBoard discoveredBoard, UnitHeuristics unitHeuristics) {
+        var heuristic = 0f;
+        if (gameState.isGameOver()) {
+            var evaluation = gameState.getGameUtilityValue();
+            if (evaluation[playerId] == 1D) heuristic += 1e6;
+        }
+        heuristic += /*gameState.getHeuristicValue(playerId)*/ +
+                discoveredBoard.getDiscoveredBoardRatio() +
+                unitHeuristics.calculatePostSimulation(playerId, gameState);
+        return heuristic;
     }
 }

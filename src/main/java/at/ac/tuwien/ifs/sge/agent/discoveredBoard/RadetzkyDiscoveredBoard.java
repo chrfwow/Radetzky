@@ -1,42 +1,49 @@
-package at.ac.tuwien.ifs.sge.agent;
+package at.ac.tuwien.ifs.sge.agent.discoveredBoard;
 
+import at.ac.tuwien.ifs.sge.agent.unitHeuristics.UnitHeuristics;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.VisionUpdate;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.MovementStartOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 import at.ac.tuwien.ifs.sge.game.empire.exception.EmpireMapException;
 import at.ac.tuwien.ifs.sge.game.empire.map.EmpireMap;
 import at.ac.tuwien.ifs.sge.game.empire.map.Size;
 import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireTerrain;
+import at.ac.tuwien.ifs.sge.game.empire.model.units.EmpireUnit;
 
-public class DiscoveredBoard {
+public class RadetzkyDiscoveredBoard implements DiscoveredBoard {
+    private final int radetzkyPlayerId;
     private final int tilesCount;
     private final float ratioPerTile;
     private float discoveredBoardRatio;
 
-    private DiscoveredBoard(int tilesCount) {
+    private RadetzkyDiscoveredBoard(int radetzkyPlayerId, int tilesCount) {
+        this.radetzkyPlayerId = radetzkyPlayerId;
         this.tilesCount = tilesCount;
         this.ratioPerTile = 1f / tilesCount;
     }
 
-    public DiscoveredBoard(int tilesCount, float ratioPerTile, float discoveredBoardRatio) {
+    private RadetzkyDiscoveredBoard(int radetzkyPlayerId, int tilesCount, float ratioPerTile, float discoveredBoardRatio) {
+        this.radetzkyPlayerId = radetzkyPlayerId;
         this.tilesCount = tilesCount;
         this.ratioPerTile = ratioPerTile;
         this.discoveredBoardRatio = discoveredBoardRatio;
     }
 
-
-    public DiscoveredBoard copy() {
-        return new DiscoveredBoard(tilesCount, ratioPerTile, discoveredBoardRatio);
+    @Override
+    public RadetzkyDiscoveredBoard copy() {
+        return new RadetzkyDiscoveredBoard(radetzkyPlayerId, tilesCount, ratioPerTile, discoveredBoardRatio);
     }
 
+    @Override
     public float getDiscoveredBoardRatio() {
         return discoveredBoardRatio;
     }
 
-    public static DiscoveredBoard get(Empire gameState) {
+    public static RadetzkyDiscoveredBoard get(int radetzkyPlayerId, Empire gameState) {
         var map = gameState.getBoard();
         var size = map.getMapSize();
-        var discoveredBoard = new DiscoveredBoard(size.getHeight() * size.getWidth());
+        var discoveredBoard = new RadetzkyDiscoveredBoard(radetzkyPlayerId, size.getHeight() * size.getWidth());
         discoveredBoard.discoveredBoardRatio = getDiscoveredTilesRatio(map, size);
         return discoveredBoard;
     }
@@ -57,26 +64,27 @@ public class DiscoveredBoard {
         return ((float) discovered) / (undiscovered + discovered);
     }
 
+    @Override
     public void apply(Empire gameState, EmpireEvent nextAction) {
-        if (nextAction instanceof MovementStartOrder movementStartOrder) {
-            var newlyDiscoveredTiles = getNumberOfNewUndiscoveredTiles(gameState, movementStartOrder);
+        if (nextAction instanceof VisionUpdate visionUpdate) {
+            if (visionUpdate.getPlayerId() != radetzkyPlayerId) return;
+            var map = gameState.getBoard();
+            var size = map.getMapSize();
+            discoveredBoardRatio = getDiscoveredTilesRatio(map, size);
+        } else if (nextAction instanceof MovementStartOrder movementStartOrder) {
+            var unit = gameState.getUnit(movementStartOrder.getUnitId());
+            if (unit.getPlayerId() != radetzkyPlayerId) return;
+            var newlyDiscoveredTiles = getNumberOfNewUndiscoveredTiles(gameState, movementStartOrder, unit);
             discoveredBoardRatio += ratioPerTile * newlyDiscoveredTiles;
         }
     }
 
-    public static float calculateHeuristics(Empire gameState, EmpireEvent empireEvent, DiscoveredBoard discoveredBoard) {
-        if (empireEvent instanceof MovementStartOrder movementStartOrder) {
-            var newlyDiscoveredTiles = getNumberOfNewUndiscoveredTiles(gameState, movementStartOrder);
-            var unitType = gameState.getUnit(movementStartOrder.getUnitId()).getUnitTypeId();
-            return ((newlyDiscoveredTiles * UnitStats.speedOfType[unitType]) / 9f) *
-                    (1f - discoveredBoard.discoveredBoardRatio); // the more tiles have been uncovered, the less sense it makes to explore
-            // todo can scouts discover more than 9 tiles per move?
-        }
-        return 0;
+    @Override
+    public void advance(long millis, Empire gameState, UnitHeuristics unitHeuristics) {
     }
 
-    private static int getNumberOfNewUndiscoveredTiles(Empire gameState, MovementStartOrder movementStartOrder) {
-        var unit = gameState.getUnit(movementStartOrder.getUnitId());
+    @Override
+    public int getNumberOfNewUndiscoveredTiles(Empire gameState, MovementStartOrder movementStartOrder, EmpireUnit unit) {
         if (unit == null) {
             System.err.println("Unit with id " + movementStartOrder.getUnitId() + " is null");
             return 0;
@@ -100,5 +108,10 @@ public class DiscoveredBoard {
             e.printStackTrace();
         }
         return newlyDiscoveredTiles;
+    }
+
+    @Override
+    public int getPlayerId() {
+        return radetzkyPlayerId;
     }
 }

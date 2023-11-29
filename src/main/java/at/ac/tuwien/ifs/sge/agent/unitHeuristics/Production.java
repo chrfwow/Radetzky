@@ -1,5 +1,6 @@
-package at.ac.tuwien.ifs.sge.agent;
+package at.ac.tuwien.ifs.sge.agent.unitHeuristics;
 
+import at.ac.tuwien.ifs.sge.agent.UnitStats;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 
 public class Production {
@@ -22,7 +23,7 @@ public class Production {
         return new Production(type, finishTime, isFinished);
     }
 
-    public void advance(UnitHeuristics unitHeuristics, long now) {
+    public void advance(RadetzkyUnitHeuristics unitHeuristics, long now) {
         if (isFinished) return;
         if (now >= finishTime) {
             isFinished = true;
@@ -30,5 +31,11 @@ public class Production {
             unitHeuristics.damageCapacity += UnitStats.damagePerSecondOfType[type];
             unitHeuristics.totalHp += UnitStats.hpOfType[type];
         }
+    }
+
+    public float getFinishedRatio(long now) {
+        var remaining = finishTime - now;
+        if (remaining <= 0) return 1f;
+        return (float) remaining / UnitStats.costOfType[type];
     }
 }

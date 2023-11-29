@@ -1,10 +1,11 @@
-package at.ac.tuwien.ifs.sge.agent;
+package at.ac.tuwien.ifs.sge.agent.unitHeuristics;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import at.ac.tuwien.ifs.sge.agent.discoveredBoard.RadetzkyDiscoveredBoard;
 import at.ac.tuwien.ifs.sge.core.engine.logging.Logger;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.InitialSpawnAction;
@@ -18,13 +19,13 @@ public class UnitDirectory {
 
     private final List<EmpireUnit> units = new ArrayList<>();
     private final Map<EmpireCity, Production> productions = new HashMap<>();
-    private final int playerId;
+    private final int radetzkyPlayerId;
 
-    public UnitDirectory(int playerId) {this.playerId = playerId;}
+    public UnitDirectory(int radetzkyPlayerId) {this.radetzkyPlayerId = radetzkyPlayerId;}
 
     public void onGameUpdate(Empire realGame, EmpireEvent action, Logger logger) {
         if (action instanceof InitialSpawnAction initialSpawnAction) {
-            if (initialSpawnAction.getPlayerId() != playerId) {
+            if (initialSpawnAction.getPlayerId() != radetzkyPlayerId) {
                 logger.info("InitialSpawnAction for wrong player");
                 return;
             }
@@ -44,11 +45,11 @@ public class UnitDirectory {
         log.info("Player has " + units.size() + " units, and " + productions.size() + " are being produced");
     }
 
-    public UnitHeuristics getHeuristics() {
-        HashMap<EmpireCity, Production> map = new HashMap<>(productions.size());
+    public RadetzkyUnitHeuristics getHeuristics(RadetzkyDiscoveredBoard discoveredBoard) {
+        HashMap<EmpireCity, Production> inProduction = new HashMap<>(productions.size());
         for (Map.Entry<EmpireCity, Production> entry : productions.entrySet()) {
-            map.put(entry.getKey(), entry.getValue().copy());
+            inProduction.put(entry.getKey(), entry.getValue().copy());
         }
-        return new UnitHeuristics(new ArrayList<>(units), map);
+        return new RadetzkyUnitHeuristics(radetzkyPlayerId, new ArrayList<>(units), inProduction, discoveredBoard);
     }
 }
