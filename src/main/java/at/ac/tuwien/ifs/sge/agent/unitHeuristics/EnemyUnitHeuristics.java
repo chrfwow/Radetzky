@@ -57,7 +57,7 @@ public class EnemyUnitHeuristics implements UnitHeuristics {
     private void onUnitDamaged(EmpireUnit unit) {
         if (unit == null) return;
         if (unit.getPlayerId() != playerId) return;
-        if (unit.getHp() > 0) return;
+        if (unit.isAlive()) return;
         if (knownUnits.remove(unit.getId()) == null) return;
         removeEstimatedUnit(unit.getUnitTypeId());
     }
@@ -79,9 +79,9 @@ public class EnemyUnitHeuristics implements UnitHeuristics {
     @Override
     public void advance(Empire gameState, long millis) {
         var bestType = getCurrentBestUnitType();
-        timeOfLastProduction += millis;
+        timeOfLastProduction += millis * discoveredBoard.getNumberOfKnownAndEstimatedCities();
         var bestCost = UnitStats.costOfType[bestType] * 1000;
-        if (bestCost > timeOfLastProduction) {
+        while (timeOfLastProduction >= bestCost) {
             timeOfLastProduction -= bestCost;
             estimatedNumberOfUnitsPerType[bestType]++;
         }

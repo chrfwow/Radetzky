@@ -10,6 +10,7 @@ import at.ac.tuwien.ifs.sge.agent.discoveredBoard.DiscoveredBoard;
 import at.ac.tuwien.ifs.sge.agent.unitHeuristics.UnitHeuristics;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.MovementStartOrder;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.ProductionStartOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 import at.ac.tuwien.ifs.sge.game.empire.map.Position;
 import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireCity;
@@ -99,6 +100,7 @@ public class EventHeuristics {
         var heuristicSum = 0.0;
 
         for (EmpireEvent event : possibleActions) {
+            if (event instanceof ProductionStartOrder) continue; // todo handled by Radetzky.onGameUpdate
             var heuristics = calculateTotalHeuristic(gameState, event, discoveredBoard);
             if (heuristics < 0) continue; // todo this totally prevents bad decisions, maybe not so good after all
             heuristicSum += heuristics;

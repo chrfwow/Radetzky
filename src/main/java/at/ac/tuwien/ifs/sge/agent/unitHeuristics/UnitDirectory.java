@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import at.ac.tuwien.ifs.sge.agent.UnitStats;
 import at.ac.tuwien.ifs.sge.agent.discoveredBoard.RadetzkyDiscoveredBoard;
 import at.ac.tuwien.ifs.sge.core.engine.logging.Logger;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
@@ -25,19 +26,20 @@ public class UnitDirectory {
 
     public void onGameUpdate(Empire realGame, EmpireEvent action, Logger logger) {
         if (action instanceof InitialSpawnAction initialSpawnAction) {
-            if (initialSpawnAction.getPlayerId() != radetzkyPlayerId) {
-                logger.info("InitialSpawnAction for wrong player");
-                return;
+            if (initialSpawnAction.getPlayerId() != radetzkyPlayerId) return;
+            synchronized (units) {
+                units.add(realGame.getUnit(initialSpawnAction.getUnitId()));
             }
-            units.add(realGame.getUnit(initialSpawnAction.getUnitId()));
         } else if (action instanceof ProductionStartOrder productionStartOrder) {
             var city = realGame.getCitiesByPosition().get(productionStartOrder.getCityPosition());
-            logger.info("ProductionStartOrder for city " + city + " and unit type " + productionStartOrder.getUnitTypeId());
-            productions.put(city, new Production(realGame, productionStartOrder.getUnitTypeId()));
+            synchronized (productions) {
+                productions.put(city, new Production(realGame, productionStartOrder.getUnitTypeId()));
+            }
         } else if (action instanceof ProductionStopOrder productionStopOrder) {
             var city = realGame.getCitiesByPosition().get(productionStopOrder.getCityPosition());
-            logger.info("ProductionStopOrder for city " + city);
-            productions.remove(city);
+            synchronized (productions) {
+                productions.remove(city);
+            }
         }
     }
 
@@ -46,10 +48,31 @@ public class UnitDirectory {
     }
 
     public RadetzkyUnitHeuristics getHeuristics(RadetzkyDiscoveredBoard discoveredBoard) {
-        HashMap<EmpireCity, Production> inProduction = new HashMap<>(productions.size());
-        for (Map.Entry<EmpireCity, Production> entry : productions.entrySet()) {
-            inProduction.put(entry.getKey(), entry.getValue().copy());
+        HashMap<EmpireCity, Production> inProduction;
+        synchronized (productions) {
+            inProduction = new HashMap<>(productions.size());
+            for (Map.Entry<EmpireCity, Production> entry : productions.entrySet()) {
+                inProduction.put(entry.getKey(), entry.getValue().copy());
+            }
         }
-        return new RadetzkyUnitHeuristics(radetzkyPlayerId, new ArrayList<>(units), inProduction, discoveredBoard);
+        List<EmpireUnit> unitsCopy;
+        synchronized (units) {
+            unitsCopy = new ArrayList<>(units);
+        }
+        return new RadetzkyUnitHeuristics(radetzkyPlayerId, unitsCopy, inProduction, discoveredBoard);
+    }
+
+
+    public static int getBestCurrentUnitType(RadetzkyDiscoveredBoard discoveredBoard) {
+        var bestType = 1;
+        var bestHeuristic = UnitHeuristics.calculateHeuristicFromUnitType(bestType, discoveredBoard);
+        for (int i = 2; i < UnitStats.costOfType.length; i++) {
+            var current = UnitHeuristics.calculateHeuristicFromUnitType(i, discoveredBoard);
+            if (current > bestHeuristic) {
+                bestHeuristic = current;
+                bestType = i;
+            }
+        }
+        return bestType;
     }
 }

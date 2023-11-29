@@ -13,7 +13,7 @@ public interface UnitHeuristics {
 
     void apply(Empire gameState, EmpireEvent action);
 
-    void advance(Empire gameState,long millis);
+    void advance(Empire gameState, long millis);
 
     float calculatePostSimulation(int playerId, Empire gameState);
 
@@ -76,6 +76,7 @@ public interface UnitHeuristics {
     static UnitHeuristics[] copy(UnitHeuristics[] immutableBoards) {
         var copy = new UnitHeuristics[immutableBoards.length];
         for (int i = 0; i < copy.length; i++) {
+            if (immutableBoards[i] == null) continue;
             copy[i] = immutableBoards[i].copy();
         }
         return copy;

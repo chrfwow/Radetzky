@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import at.ac.tuwien.ifs.sge.agent.UnitStats;
 import at.ac.tuwien.ifs.sge.agent.discoveredBoard.RadetzkyDiscoveredBoard;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.ProductionAction;

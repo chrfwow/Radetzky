@@ -1,5 +1,6 @@
 package at.ac.tuwien.ifs.sge.agent.discoveredBoard;
 
+import at.ac.tuwien.ifs.sge.agent.UnitStats;
 import at.ac.tuwien.ifs.sge.agent.unitHeuristics.UnitHeuristics;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.VisionUpdate;

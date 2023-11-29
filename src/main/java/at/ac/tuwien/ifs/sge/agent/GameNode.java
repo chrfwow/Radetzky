@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 
 import at.ac.tuwien.ifs.sge.agent.discoveredBoard.DiscoveredBoard;
 import at.ac.tuwien.ifs.sge.agent.unitHeuristics.UnitHeuristics;
@@ -13,7 +14,9 @@ import at.ac.tuwien.ifs.sge.core.engine.communication.events.GameActionEvent;
 import at.ac.tuwien.ifs.sge.core.engine.logging.Logger;
 import at.ac.tuwien.ifs.sge.core.game.exception.ActionException;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.ProductionStartOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
+import at.ac.tuwien.ifs.sge.game.empire.model.map.EmpireCity;
 
 public class GameNode {
     private final int executionTime;
@@ -82,8 +85,39 @@ public class GameNode {
         gameNode.parent = this;
     }
 
+    private static final Comparator<GameNode> heuristicComparator = Comparator.<GameNode>comparingDouble(a -> a.heuristic[a.radetzkyPlayerId]).reversed();
+    private static final Comparator<GameNode> visitsComparator = Comparator.<GameNode>comparingDouble(a -> a.heuristic[a.radetzkyPlayerId]).reversed();
+
+    public EmpireEvent getNonTaskedActionOrNull(UUID[] forbiddenUnits) {
+        children.sort(heuristicComparator);
+        children.sort(visitsComparator);
+
+        for (int i = 0; i < children.size(); i++) {
+            var current = children.get(i);
+            if (current.visits < 1) return null; // too low confidence, better do nothing
+            if (current.heuristicOfRadetzky(Radetzky.DEFAULT_EXPLOITATION_CONSTANT) <= 0) continue; // better if we did nothing
+
+            var action = current.responsibleAction;
+            if (action instanceof ProductionStartOrder) continue; // todo unit production handled in Radetzky.onGameUpdate
+
+            var unit = EmpireEventHelper.getTaskedUnitIdFromEventOrNull(action);
+            if (unit == null) return action;
+            var foundInForbidden = false;
+            for (int j = 0; j < forbiddenUnits.length; j++) {
+                if (unit.equals(forbiddenUnits[j])) {
+                    foundInForbidden = true;
+                    break;
+                }
+            }
+            if (!foundInForbidden) return action;
+        }
+        return null;
+    }
+
     private Empire getGameState(UnitHeuristics[] copyOfImmutableUnit, DiscoveredBoard[] copyOfImmutableBoard) throws ActionException {
-        if (parent == null) return (Empire) immutableGameState.copy();
+        if (parent == null) {
+            return (Empire) immutableGameState.copy();
+        }
         Empire currentState = parent.getGameState(copyOfImmutableUnit, copyOfImmutableBoard);
 
         if (responsibleAction != null) {
@@ -165,11 +199,12 @@ public class GameNode {
 
     public float heuristic(float exploitationConstant) {
         var ucb1 = upperConfidenceBound(exploitationConstant);
-        var maxHeuristic = heuristic[0];
-        for (int i = 0; i < heuristic.length; i++) {
-            if (maxHeuristic < heuristic[i]) maxHeuristic = heuristic[i];
-        }
         return ucb1 + heuristic[responsiblePlayerId];// maxHeuristic;// heuristic[radetzkyPlayerId]; // todo really +? Would * be better?
+    }
+
+    public float heuristicOfRadetzky(float exploitationConstant) {
+        var ucb1 = upperConfidenceBound(exploitationConstant);
+        return ucb1 + heuristic[radetzkyPlayerId];// maxHeuristic;// heuristic[radetzkyPlayerId]; // todo really +? Would * be better?
     }
 
     private float upperConfidenceBound(float exploitationConstant) {
@@ -241,15 +276,15 @@ public class GameNode {
 
     public void simulate(Random random, int simulationDepth, long timeOfNextDecision, Logger log) {
         var depth = 0;
-        var unitHeuristics = UnitHeuristics.copy(immutableUnitHeuristics); // todo make one for each player
+        var unitHeuristics = UnitHeuristics.copy(immutableUnitHeuristics);
         var discoveredBoards = DiscoveredBoard.copy(immutableDiscoveredBoard);
-        var numberOfPlayers = immutableGameState.getNumberOfPlayers();
         Empire game;
         try {
             game = getGameState(unitHeuristics, discoveredBoards);
         } catch (ActionException e) {
             return;
         }
+        var numberOfPlayers = game.getNumberOfPlayers();
         var currentPlayer = playerId;
         try {
             while (!game.isGameOver() && depth++ <= simulationDepth && System.currentTimeMillis() < timeOfNextDecision) {

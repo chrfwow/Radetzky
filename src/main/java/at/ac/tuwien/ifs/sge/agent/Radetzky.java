@@ -3,6 +3,7 @@ package at.ac.tuwien.ifs.sge.agent;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
@@ -17,6 +18,10 @@ import at.ac.tuwien.ifs.sge.core.engine.communication.ActionResult;
 import at.ac.tuwien.ifs.sge.core.engine.communication.events.GameActionEvent;
 import at.ac.tuwien.ifs.sge.core.game.exception.ActionException;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.CombatHitAction;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.MovementAction;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.action.ProductionAction;
+import at.ac.tuwien.ifs.sge.game.empire.communication.event.order.start.ProductionStartOrder;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
 
 public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
@@ -24,12 +29,14 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
     private static final int DEFAULT_SIMULATION_DEPTH = 30;
     private static final int executionTime = 2000;
     private static final int simulationTimeStep = 1000;
-    private Future<?> mctsIterationFuture;
+    private static final int simulationThreads = 6;
+    private final Future<?>[] mctsIterationFutures = new Future[simulationThreads];
     private volatile boolean isRunning;
     private UnitDirectory unitDirectory;
     private RadetzkyDiscoveredBoard radetzkyDiscoveredBoard;
     private UnitHeuristics[] unitHeuristics;
     private DiscoveredBoard[] gameBoards;
+    private int numberOfUnits = 1;
 
     public static void main(String[] args) {
         var playerId = getPlayerIdFromArgs(args);
@@ -47,7 +54,25 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
         isRunning = true;
         unitDirectory = new UnitDirectory(playerId);
         initHeuristics();
-        mctsIterationFuture = pool.submit(this::playSimulation);
+        mctsIterationFutures[0] = pool.submit(() -> {
+            for (int i = 1; i < simulationThreads; i++) {
+                final int id = i;
+                mctsIterationFutures[i] = pool.submit(() -> playSimulation(id));
+                try {
+                    Thread.sleep(executionTime / simulationThreads);
+                } catch (InterruptedException ignored) {}
+            }
+            playSimulation(0);
+        });
+        var game = getGame();
+        for (EmpireEvent action : game.getPossibleActions(playerId)) {
+            if (action instanceof ProductionStartOrder productionStartOrder) {
+                if (productionStartOrder.getUnitTypeId() == 2) {
+                    sendAction(action, System.currentTimeMillis() + 50);
+                    return;
+                }
+            }
+        }
     }
 
     private void initHeuristics() {
@@ -73,7 +98,7 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
     @Override
     protected int getMinimumNumberOfThreads() {
-        return super.getMinimumNumberOfThreads() + 2;
+        return super.getMinimumNumberOfThreads() + 2 + simulationThreads;
     }
 
     @Override
@@ -90,8 +115,32 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
             var action = entry.getKey();
             unitDirectory.onGameUpdate(game, action, log);
             for (int i = 0; i < unitHeuristics.length; i++) {
-                unitHeuristics[i].apply(game, action);
+                if (unitHeuristics[i] != null) unitHeuristics[i].apply(game, action);
                 gameBoards[i].apply(game, action);
+            }
+
+            if (action instanceof ProductionAction productionAction) {
+                var cityPosition = productionAction.getCityPosition();
+                var city = game.getCity(cityPosition);
+                if (city == null) return;
+                var newUnit = game.getUnit(productionAction.getUnitId());
+                if (newUnit.getPlayerId() != playerId) continue;
+                if (numberOfUnits < game.getGameConfiguration().getUnitCap()) sendAction(new ProductionStartOrder(cityPosition, UnitDirectory.getBestCurrentUnitType(radetzkyDiscoveredBoard)), System.currentTimeMillis() + 50);
+                numberOfUnits++;
+            } else if (action instanceof MovementAction movementAction) {
+                var unit = game.getUnit(movementAction.getUnitId());
+                if (unit == null || unit.getPlayerId() != playerId) return;
+                var destination = movementAction.getDestination();
+                var city = game.getCity(destination);
+                if (city == null) return;
+                if (numberOfUnits < game.getGameConfiguration().getUnitCap()) sendAction(new ProductionStartOrder(destination, UnitDirectory.getBestCurrentUnitType(radetzkyDiscoveredBoard)), System.currentTimeMillis() + 50);
+            } else if (action instanceof CombatHitAction combatHitAction) {
+                var hitUnit = game.getUnit(combatHitAction.getTargetId());
+                if (hitUnit.getPlayerId() != playerId) return;
+                if (!hitUnit.isAlive()) {
+                    numberOfUnits--;
+                    //todo produce unit in some city
+                }
             }
         }
     }
@@ -99,16 +148,28 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
     @Override
     public void shutdown() {
         isRunning = false;
-        mctsIterationFuture.cancel(true);
+        for (int i = 0; i < simulationThreads; i++) {
+            mctsIterationFutures[i].cancel(true);
+        }
     }
 
-    private void playSimulation() {
+    private final UUID[] unitsTaskedByThreads = new UUID[simulationThreads];
+
+    private UUID[] copyUnitsTaskedByThreads() {
+        UUID[] copy = new UUID[simulationThreads];
+        System.arraycopy(unitsTaskedByThreads, 0, copy, 0, simulationThreads);
+        return copy;
+    }
+
+    private void playSimulation(int threadNumber) {
         log.info("play simulation");
         Random random = new Random(0);
         EmpireEvent lastAction = null;
         while (isRunning) {
             try {
                 var simulatedGameState = copyGame();
+                var unitHeuristics = UnitHeuristics.copy(this.unitHeuristics);
+                var gameBoards = DiscoveredBoard.copy(this.gameBoards);
                 unitHeuristics[playerId] = unitDirectory.getHeuristics(radetzkyDiscoveredBoard.copy());
 
                 applyLastAction(lastAction, numberOfPlayers, gameBoards, unitHeuristics, simulatedGameState);
@@ -136,13 +197,18 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
                     iterations++;
                 }
 
+
                 if (root.isLeaf()) {
                     log.info("Could not find a move! Doing nothing...");
+                    unitsTaskedByThreads[threadNumber] = null;
                 } else {
                     log.info("Iterations: " + iterations);
                     // root.print(log);
-                    var mostVisitedChild = root.getMostVisitedChild();
-                    var bestAction = mostVisitedChild.getResponsibleAction();
+
+                    var taskedUnits = copyUnitsTaskedByThreads();
+                    taskedUnits[threadNumber] = null;
+                    var bestAction = root.getNonTaskedActionOrNull(taskedUnits);
+                    unitsTaskedByThreads[threadNumber] = EmpireEventHelper.getTaskedUnitIdFromEventOrNull(bestAction);
                     if (bestAction != null) {
                         log.info("Determined next action: " + bestAction.getClass().getSimpleName() + " " + bestAction);
                         sendAction(bestAction, System.currentTimeMillis() + 50);
