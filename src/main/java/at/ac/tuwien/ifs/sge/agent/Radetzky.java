@@ -22,9 +22,7 @@ import java.util.TimerTask;
 import java.util.UUID;
 
 public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
-    private static final int START_DELAY_IN_MILLISECONDS = 1000;
-    private static final int TIMER_INTERVAL_IN_MILLISECONDS = 100;
-    private static final int ACTION_EXECUTION_TIME_IN_MILLISECONDS = 100;
+    private static final int actionExecutionTime = 100;
 
     private final Random random = new Random();
 
@@ -106,7 +104,7 @@ public class Radetzky extends AbstractRealTimeGameAgent<Empire, EmpireEvent> {
 
             var nextAction = Util.selectRandom(possibleUnitMoveActions, random);
 
-            sendAction(nextAction, System.currentTimeMillis() + ACTION_EXECUTION_TIME_IN_MILLISECONDS);
+            sendAction(nextAction, System.currentTimeMillis() + actionExecutionTime);
         } catch (EmpireMapException e) {
             log.error("Actions for unit " + unit.getId() + " could not be retrieved.");
             log.printStackTrace(e);
