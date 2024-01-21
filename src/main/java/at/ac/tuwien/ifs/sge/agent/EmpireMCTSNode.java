@@ -4,6 +4,8 @@ import at.ac.tuwien.ifs.sge.core.game.exception.ActionException;
 import at.ac.tuwien.ifs.sge.core.util.Util;
 import at.ac.tuwien.ifs.sge.game.empire.communication.event.EmpireEvent;
 import at.ac.tuwien.ifs.sge.game.empire.core.Empire;
+import at.ac.tuwien.ifs.sge.game.empire.exception.EmpireMapException;
+import at.ac.tuwien.ifs.sge.game.empire.model.units.EmpireUnit;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,28 +19,34 @@ public class EmpireMCTSNode {
     private final EmpireEvent action;
 
     private int visitCount = 0;
-    private double totalReward = 0;
+    private int totalReward = 0;
 
     private List<EmpireMCTSNode> children = new ArrayList<>();
     private List<EmpireEvent> unexploredActions = new ArrayList<>();
 
-    public EmpireMCTSNode(Empire game, int playerId, EmpireMCTSNode parent, EmpireEvent action) {
+    public EmpireMCTSNode(Empire game, EmpireUnit unit, EmpireMCTSNode parent, EmpireEvent action) {
         this.parent = parent;
         this.action = action;
 
+//        try {
+//            var gameCopy = game.copy();
+//
+//            gameCopy.applyAction(action, System.currentTimeMillis() + actionExecutionTime);
+//            gameCopy.advance(actionExecutionTime);
+
         try {
-            var gameCopy = game.copy();
+            var possibleActions = game.getBoard().getPossibleActions(unit);
 
-            gameCopy.applyAction(action, System.currentTimeMillis() + actionExecutionTime);
-            gameCopy.advance(actionExecutionTime);
-
-            unexploredActions = game.getPossibleActions(playerId).stream().toList();
-        } catch (ActionException e) {
+            unexploredActions.addAll(possibleActions);
+        } catch (EmpireMapException e) {
             game.getLogger().logError(e.getMessage());
         }
+//        } catch (ActionException e) {
+//            game.getLogger().logError(e.getMessage());
+//        }
     }
 
-    public void update(double reward) {
+    public void update(int reward) {
         totalReward += reward;
         ++visitCount;
     }
@@ -48,14 +56,14 @@ public class EmpireMCTSNode {
             return null;
         }
 
-        double bestAverageReward = 0.0;
+        float bestAverageReward = Integer.MIN_VALUE;
         EmpireMCTSNode bestChild = null;
 
         for (var child : children) {
-            double averageReward = 0.0;
+            float averageReward = Integer.MIN_VALUE + 1;
 
             if (child.visitCount > 0) {
-                averageReward = child.totalReward / child.visitCount;
+                averageReward = child.totalReward / (float) child.visitCount;
             }
 
             if (averageReward > bestAverageReward) {
@@ -75,24 +83,22 @@ public class EmpireMCTSNode {
         return Util.selectRandom(children, random);
     }
 
-    public EmpireMCTSNode obtainUnvisitedChild(Empire game, int playerId) {
+    public EmpireMCTSNode obtainUnvisitedChild(Empire game, EmpireUnit unit) {
         if (unexploredActions.isEmpty()) {
             return null;
         }
 
         int index = random.nextInt(unexploredActions.size());
-
         var unexploredAction = unexploredActions.remove(index);
+        var newNode = new EmpireMCTSNode(game, unit, this, unexploredAction);
 
-        return new EmpireMCTSNode(game, playerId, this, unexploredAction);
-    }
+        children.add(newNode);
 
-    private int obtainReward() {
-        return 0;
+        return newNode;
     }
 
     public boolean terminal() {
-        return children.isEmpty() || fullyExpanded();
+        return children.isEmpty() && fullyExpanded();
     }
 
     public boolean fullyExpanded() {
@@ -101,5 +107,13 @@ public class EmpireMCTSNode {
 
     public EmpireMCTSNode getParent() {
         return parent;
+    }
+
+    public EmpireEvent getAction() {
+        return action;
+    }
+
+    public double getTotalReward() {
+        return totalReward;
     }
 }
